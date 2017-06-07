@@ -174,6 +174,8 @@ const char *AU_DBA_USER_NAME = "DBA";
          strcmp(name, CT_AUTHORIZATIONS_NAME) == 0 || \
 	 strcmp(name, CT_CHARSET_NAME) == 0)
 
+#define UNIQUE_SAVEPOINT_DROP_USER_ENTITY "dROPuSEReNTITY"
+
 typedef enum fetch_by FETCH_BY;
 enum fetch_by
 {
@@ -3381,6 +3383,7 @@ int
 au_drop_user (MOP user)
 {
   int save;
+  bool set_savepoint = false;
   DB_SESSION *session = NULL;
   DB_VALUE val[2], user_val, gvalue, value, password_val;
   STATEMENT_ID stmt_id;
@@ -3483,13 +3486,18 @@ au_drop_user (MOP user)
       pr_clear_value (&val[0]);
     }
 
+  error = tran_system_savepoint (UNIQUE_SAVEPOINT_DROP_USER_ENTITY);
+  if (error != NO_ERROR)
+    {
+      goto error;
+    }
+  set_savepoint = true;
 
   /* propagate user deletion to groups */
   db_make_object (&val[1], user);
 
-  session =
-    db_open_buffer ("update [db_user] [d] set "
-		    "[d].[direct_groups] = [d].[direct_groups] - ? where ? in [d].[direct_groups];");
+  session = db_open_buffer ("update [db_user] [d] set [d].[direct_groups] = [d].[direct_groups] - ? "
+			    "where ? in [d].[direct_groups];");
   if (session == NULL)
     {
       assert (er_errid () != NO_ERROR);
@@ -3643,6 +3651,11 @@ au_drop_user (MOP user)
     }
 
 error:
+  if (set_savepoint && error != ER_LK_UNILATERALLY_ABORTED)
+    {
+      tran_abort_upto_system_savepoint (UNIQUE_SAVEPOINT_DROP_USER_ENTITY);
+    }
+
   AU_ENABLE (save);
   return error;
 }
