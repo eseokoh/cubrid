@@ -447,20 +447,16 @@ static DB_METHOD_LINK au_static_links[] = {
   {"au_add_member_method", (METHOD_LINK_FUNCTION) au_add_member_method},
   {"au_drop_member_method", (METHOD_LINK_FUNCTION) au_drop_member_method},
   {"au_set_password_method", (METHOD_LINK_FUNCTION) au_set_password_method},
-  {"au_set_password_encoded_method",
-   (METHOD_LINK_FUNCTION) au_set_password_encoded_method},
-  {"au_set_password_encoded_sha1_method",
-   (METHOD_LINK_FUNCTION) au_set_password_encoded_sha1_method},
+  {"au_set_password_encoded_method", (METHOD_LINK_FUNCTION) au_set_password_encoded_method},
+  {"au_set_password_encoded_sha1_method", (METHOD_LINK_FUNCTION) au_set_password_encoded_sha1_method},
   {"au_describe_user_method", (METHOD_LINK_FUNCTION) au_describe_user_method},
   {"au_describe_root_method", (METHOD_LINK_FUNCTION) au_describe_root_method},
   {"au_info_method", (METHOD_LINK_FUNCTION) au_info_method},
   {"au_login_method", (METHOD_LINK_FUNCTION) au_login_method},
   {"au_change_owner_method", (METHOD_LINK_FUNCTION) au_change_owner_method},
-  {"au_change_trigger_owner_method",
-   (METHOD_LINK_FUNCTION) au_change_trigger_owner_method},
+  {"au_change_trigger_owner_method", (METHOD_LINK_FUNCTION) au_change_trigger_owner_method},
   {"au_get_owner_method", (METHOD_LINK_FUNCTION) au_get_owner_method},
-  {"au_check_authorization_method",
-   (METHOD_LINK_FUNCTION) au_check_authorization_method},
+  {"au_check_authorization_method", (METHOD_LINK_FUNCTION) au_check_authorization_method},
 
   /* 
    * qo_set_cost
@@ -483,10 +479,8 @@ static DB_METHOD_LINK au_static_links[] = {
   {"get_attribute_number", (METHOD_LINK_FUNCTION) get_attribute_number},
   {"dbmeth_class_name", (METHOD_LINK_FUNCTION) dbmeth_class_name},
   {"dbmeth_print", (METHOD_LINK_FUNCTION) dbmeth_print},
-  {"au_change_sp_owner_method",
-   (METHOD_LINK_FUNCTION) au_change_sp_owner_method},
-  {"au_change_serial_owner_method",
-   (METHOD_LINK_FUNCTION) au_change_serial_owner_method},
+  {"au_change_sp_owner_method", (METHOD_LINK_FUNCTION) au_change_sp_owner_method},
+  {"au_change_serial_owner_method", (METHOD_LINK_FUNCTION) au_change_serial_owner_method},
 
   {NULL, NULL}
 };
@@ -2219,21 +2213,18 @@ au_add_user (const char *name, int *exists)
       goto error;
     }
 
-  if (Au_public_user == NULL)
+  if (Au_public_user != NULL)
     {
-      assert (Au_public_user != NULL);
-      goto error;
-    }
-
-  /* 
-   * every user is a member of the PUBLIC group,
-   * must make sure that the exported routines can't
-   * be used to violate this internal connection
-   */
-  if (au_add_member_internal (Au_public_user, user, 1) != NO_ERROR)
-    {
-      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
-      goto error;
+      /* 
+       * every user is a member of the PUBLIC group,
+       * must make sure that the exported routines can't
+       * be used to violate this internal connection
+       */
+      if (au_add_member_internal (Au_public_user, user, 1) != NO_ERROR)
+	{
+	  er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
+	  goto error;
+	}
     }
 
   /* 
