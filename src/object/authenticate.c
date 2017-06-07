@@ -5187,7 +5187,7 @@ au_revoke (MOP user, MOP class_mop, DB_AUTH type)
   error = sm_partitioned_class_type (class_mop, &is_partition, NULL, &sub_partitions);
   if (error != NO_ERROR)
     {
-      return error;
+      goto end;
     }
 
   if (is_partition == DB_PARTITIONED_CLASS)
@@ -5360,16 +5360,22 @@ au_change_owner_method (MOP obj, DB_VALUE * returnval, DB_VALUE * class_, DB_VAL
 	{
 	  error = tran_system_savepoint (UNIQUE_PARTITION_SAVEPOINT_OWNER);
 	  if (error != NO_ERROR)
-	    goto fail_return;
+	    {
+	      goto fail_return;
+	    }
 	  savepoint_owner = 1;
 	  for (i = 0; sub_partitions[i]; i++)
 	    {
 	      error = au_change_owner (sub_partitions[i], user);
 	      if (error != NO_ERROR)
-		break;
+		{
+		  break;
+		}
 	    }
 	  if (error != NO_ERROR)
-	    goto fail_return;
+	    {
+	      goto fail_return;
+	    }
 	}
     }
 
@@ -5569,7 +5575,9 @@ au_change_trigger_owner_method (MOP obj, DB_VALUE * returnval, DB_VALUE * trigge
 		{
 		  error = au_change_trigger_owner (trigger_mop, user);
 		  if (error == NO_ERROR)
-		    ok = 1;
+		    {
+		      ok = 1;
+		    }
 		}
 	    }
 	}
@@ -6131,12 +6139,14 @@ fetch_class (MOP op, MOP * return_mop, SM_CLASS ** return_class, AU_FETCHMODE fe
 	case AU_FETCH_UPDATE:
 	  class_ = (SM_CLASS *) locator_fetch_class_of_instance (op, &classmop, DB_FETCH_WRITE);
 	  if (class_ != NULL)
-	    /* 
-	     * all this appreciably does is set the dirty flag in the MOP
-	     * should have the "dirty after getting write lock" operation
-	     * separated
-	     */
-	    class_ = (SM_CLASS *) locator_update_class (classmop);
+	    {
+	      /* 
+	       * all this appreciably does is set the dirty flag in the MOP
+	       * should have the "dirty after getting write lock" operation
+	       * separated
+	       */
+	      class_ = (SM_CLASS *) locator_update_class (classmop);
+	    }
 	  break;
 	}
     }
