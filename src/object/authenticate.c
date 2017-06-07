@@ -178,6 +178,7 @@ const char *AU_DBA_USER_NAME = "DBA";
 #define UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY "aDDuSERaNDsETpASSeNTITY"
 #define UNIQUE_SAVEPOINT_DROP_USER_ENTITY "dROPuSEReNTITY"
 #define UNIQUE_SAVEPOINT_GRANT_USER "gRANTuSER"
+#define UNIQUE_SAVEPOINT_REVOKE_USER "rEVOKEuSER"
 
 typedef enum fetch_by FETCH_BY;
 enum fetch_by
@@ -535,6 +536,7 @@ static int update_cache (MOP classop, SM_CLASS * sm_class, AU_CLASS_CACHE * cach
 static int appropriate_error (unsigned int bits, unsigned int requested);
 static int check_grant_option (MOP classop, SM_CLASS * sm_class, DB_AUTH type);
 static int au_grant_internal (MOP user, MOP class_mop, DB_AUTH type, bool grant_option);
+static int au_revoke_internal (MOP user, MOP class_mop, DB_AUTH type);
 
 static void free_grant_list (AU_GRANT * grants);
 static int collect_class_grants (MOP class_mop, DB_AUTH type, MOP revoked_auth, int revoked_grant_index,
@@ -4437,7 +4439,7 @@ check_grant_option (MOP classop, SM_CLASS * sm_class, DB_AUTH type)
  */
 
 /*
- * au_grant_internal - worker function for granting authorization on a class.
+ * au_grant_internal - worker function for au_grant
  *   return: error code
  *   user(in): user receiving the grant
  *   class_mop(in): class being authorized
@@ -4985,8 +4987,167 @@ propagate_revoke (AU_GRANT * grant_list, MOP owner, DB_AUTH mask)
 }
 
 /*
- * au_revoke - This is the primary interface function for
- *             revoking authorization
+ * au_revoke_internal - worker function for au_revoke
+ *   return: error code
+ *   user(in): user being revoked
+ *   class_mop(in): class being revoked
+ *   type(in): type of authorization being revoked
+ *
+ * Note: The authorization of the given type on the given class is removed
+ *       from the authorization info stored with the given user.  If this
+ *       user has the grant option for this type and has granted authorization
+ *       to other users, the revoke will be recursively propagated to all
+ *       affected users.
+ */
+static int
+au_revoke_internal (MOP user, MOP class_mop, DB_AUTH type)
+{
+  int error;
+  MOP auth;
+  DB_SET *grants = NULL;
+  DB_VALUE cache_element;
+  int current, mask, gindex;
+  AU_GRANT *grant_list;
+  SM_CLASS *classobj;
+
+  error = au_fetch_class_force (class_mop, &classobj, AU_FETCH_READ);
+  if (error != NO_ERROR)
+    {
+      return error;
+    }
+
+  error = check_grant_option (class_mop, classobj, type);
+  if (error != NO_ERROR)
+    {
+      return error;
+    }
+
+  if (au_get_object (user, "authorization", &auth) != NO_ERROR)
+    {
+      error = ER_AU_ACCESS_ERROR;
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 2, AU_USER_CLASS_NAME, "authorization");
+      return error;
+    }
+
+  if (au_fetch_instance (auth, NULL, AU_FETCH_UPDATE, LC_FETCH_MVCC_VERSION, AU_UPDATE) != NO_ERROR)
+    {
+      error = ER_AU_CANT_UPDATE;
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
+      return error;
+    }
+
+  error = obj_inst_lock (auth, 1);
+  if (error != NO_ERROR)
+    {
+      return error;
+    }
+
+  error = get_grants (auth, &grants, 1);
+  if (error != NO_ERROR)
+    {
+      return error;
+    }
+
+  gindex = find_grant_entry (grants, class_mop, Au_user);
+  if (gindex == -1)
+    {
+      error = ER_AU_GRANT_NOT_FOUND;
+      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
+      goto end;
+    }
+
+  /* get current cache bits */
+  error = set_get_element (grants, gindex + 2, &cache_element);
+  if (error != NO_ERROR)
+    {
+      goto end;
+    }
+  current = db_get_int (&cache_element);
+
+  /* 
+   * If all the bits are set, assume we wan't to
+   * revoke everything previously granted, makes it a bit
+   * easier but muddies the semantics too much ?
+   */
+  if (type == DB_AUTH_ALL)
+    {
+      type = (DB_AUTH) (current & AU_TYPE_MASK);
+    }
+
+  /* 
+   * this test could be more sophisticated, right now,
+   * if there are any valid grants that fit in
+   * the specified bit mask, the operation will proceed,
+   * we could make sure that every bit in the supplied
+   * mask is also present in the cache and if not abort
+   * the whole thing
+   */
+
+  if ((current & (int) type) == 0)
+    {
+      error = ER_AU_GRANT_NOT_FOUND;
+      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
+      goto end;
+    }
+
+  error = collect_class_grants (class_mop, type, auth, gindex, &grant_list);
+  if (error != NO_ERROR)
+    {
+      goto end;
+    }
+
+  /* calculate the mask to turn off the grant */
+  mask = (int) ~(type | (type << AU_GRANT_SHIFT));
+
+  /* propagate the revoke to the affected classes */
+  error = propagate_revoke (grant_list, classobj->owner, (DB_AUTH) mask);
+  if (error != NO_ERROR)
+    {
+      goto end;
+    }
+
+  /* finally, update the local grant for the original object */
+  current &= mask;
+  if (current)
+    {
+      db_make_int (&cache_element, current);
+      set_put_element (grants, gindex + 2, &cache_element);
+    }
+  else
+    {
+      /* no remaining grants, remove it from the grant set */
+      drop_grant_entry (grants, gindex);
+    }
+
+  /* clear the cache for this user/class pair to make sure we recalculate it the next time it is referenced */
+  reset_cache_for_user_and_class (classobj);
+
+#if defined(SA_MODE)
+  if (catcls_Enable == true)
+#endif /* SA_MODE */
+    {
+      error = au_delete_new_auth (Au_user, user, class_mop, type);
+    }
+
+  /* 
+   * Make sure that we don't keep any parse trees around that rely on obsolete authorization.
+   * This may not be necessary.
+   */
+  sm_bump_local_schema_version ();
+
+  free_grant_list (grant_list);
+
+end:
+  if (grants != NULL)
+    {
+      set_free (grants);
+    }
+
+  return error;
+}
+
+/*
+ * au_revoke - This is the primary interface function for revoking authorization
  *   return: error code
  *   user(in): user being revoked
  *   class_mop(in): class being revoked
@@ -4998,20 +5159,30 @@ propagate_revoke (AU_GRANT * grant_list, MOP owner, DB_AUTH mask)
  *       to other users, the revoke will be recursively propagated to all
  *       affected users.
  *
- * TODO : LP64
  */
 int
 au_revoke (MOP user, MOP class_mop, DB_AUTH type)
 {
-  int error;
-  MOP auth;
-  DB_SET *grants = NULL;
-  DB_VALUE cache_element;
-  int current, mask, save = 0, gindex;
-  AU_GRANT *grant_list;
-  SM_CLASS *classobj;
-  int is_partition = DB_NOT_PARTITIONED_CLASS, i = 0, savepoint_revoke = 0;
+  int save = 0, error;
+  int is_partition = DB_NOT_PARTITIONED_CLASS, i = 0;
+  bool savepoint_revoke = false;
   MOP *sub_partitions = NULL;
+
+  if (ws_is_same_object (user, Au_user))
+    {
+      error = ER_AU_CANT_REVOKE_SELF;
+      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
+      return error;
+    }
+
+  AU_DISABLE (save);
+
+  error = tran_system_savepoint (UNIQUE_SAVEPOINT_REVOKE_USER);
+  if (error != NO_ERROR)
+    {
+      goto end;
+    }
+  savepoint_revoke = true;
 
   error = sm_partitioned_class_type (class_mop, &is_partition, NULL, &sub_partitions);
   if (error != NO_ERROR)
@@ -5021,180 +5192,38 @@ au_revoke (MOP user, MOP class_mop, DB_AUTH type)
 
   if (is_partition == DB_PARTITIONED_CLASS)
     {
-      error = tran_system_savepoint (UNIQUE_PARTITION_SAVEPOINT_REVOKE);
-      if (error != NO_ERROR)
-	{
-	  goto fail_end;
-	}
-      savepoint_revoke = 1;
-
       for (i = 0; sub_partitions[i]; i++)
 	{
-	  error = au_revoke (user, sub_partitions[i], type);
+	  error = au_revoke_internal (user, sub_partitions[i], type);
 	  if (error != NO_ERROR)
 	    {
-	      break;
-	    }
-	}
-
-      free_and_init (sub_partitions);
-      if (error != NO_ERROR)
-	{
-	  goto fail_end;
-	}
-    }
-
-  AU_DISABLE (save);
-  if (ws_is_same_object (user, Au_user))
-    {
-      error = ER_AU_CANT_REVOKE_SELF;
-      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
-      goto fail_end;
-    }
-
-  error = au_fetch_class_force (class_mop, &classobj, AU_FETCH_READ);
-  if (error == NO_ERROR)
-    {
-      if (ws_is_same_object (classobj->owner, user))
-	{
-	  error = ER_AU_CANT_REVOKE_OWNER;
-	  er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
-	  goto fail_end;
-	}
-
-      error = check_grant_option (class_mop, classobj, type);
-      if (error != NO_ERROR)
-	{
-	  goto fail_end;
-	}
-
-      if (au_get_object (user, "authorization", &auth) != NO_ERROR)
-	{
-	  error = ER_AU_ACCESS_ERROR;
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 2, AU_USER_CLASS_NAME, "authorization");
-	  goto fail_end;
-	}
-      else if (au_fetch_instance (auth, NULL, AU_FETCH_UPDATE, LC_FETCH_MVCC_VERSION, AU_UPDATE) != NO_ERROR)
-	{
-	  error = ER_AU_CANT_UPDATE;
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
-	  goto fail_end;
-	}
-      else if ((error = obj_inst_lock (auth, 1)) == NO_ERROR && (error = get_grants (auth, &grants, 1)) == NO_ERROR)
-	{
-	  gindex = find_grant_entry (grants, class_mop, Au_user);
-	  if (gindex == -1)
-	    {
-	      error = ER_AU_GRANT_NOT_FOUND;
-	      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
-	      goto fail_end;
-	    }
-	  else
-	    {
-	      /* get current cache bits */
-	      error = set_get_element (grants, gindex + 2, &cache_element);
-	      if (error != NO_ERROR)
-		{
-		  set_free (grants);
-		  if (sub_partitions)
-		    {
-		      free_and_init (sub_partitions);
-		    }
-		  AU_ENABLE (save);
-		  return (error);
-		}
-	      current = db_get_int (&cache_element);
-
-	      /* 
-	       * If all the bits are set, assume we wan't to
-	       * revoke everything previously granted, makes it a bit
-	       * easier but muddies the semantics too much ?
-	       */
-	      if (type == DB_AUTH_ALL)
-		{
-		  type = (DB_AUTH) (current & AU_TYPE_MASK);
-		}
-
-	      /* 
-	       * this test could be more sophisticated, right now,
-	       * if there are any valid grants that fit in
-	       * the specified bit mask, the operation will proceed,
-	       * we could make sure that every bit in the supplied
-	       * mask is also present in the cache and if not abort
-	       * the whole thing
-	       */
-
-	      if ((current & (int) type) == 0)
-		{
-		  error = ER_AU_GRANT_NOT_FOUND;
-		  er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 0);
-		}
-	      else if ((error = collect_class_grants (class_mop, type, auth, gindex, &grant_list)) == NO_ERROR)
-		{
-
-		  /* calculate the mask to turn off the grant */
-		  mask = (int) ~(type | (type << AU_GRANT_SHIFT));
-
-		  /* propagate the revoke to the affected classes */
-		  if ((error = propagate_revoke (grant_list, classobj->owner, (DB_AUTH) mask)) == NO_ERROR)
-		    {
-
-		      /* 
-		       * finally, update the local grant for the
-		       * original object
-		       */
-		      current &= mask;
-		      if (current)
-			{
-			  db_make_int (&cache_element, current);
-			  set_put_element (grants, gindex + 2, &cache_element);
-			}
-		      else
-			{
-			  /* no remaining grants, remove it from the grant set */
-			  drop_grant_entry (grants, gindex);
-			}
-		      /* 
-		       * clear the cache for this user/class pair
-		       * to make sure we recalculate it the next time
-		       * it is referenced
-		       */
-		      reset_cache_for_user_and_class (classobj);
-
-#if defined(SA_MODE)
-		      if (catcls_Enable == true)
-#endif /* SA_MODE */
-			error = au_delete_new_auth (Au_user, user, class_mop, type);
-
-		      /* 
-		       * Make sure that we don't keep any parse trees
-		       * around that rely on obsolete authorization.
-		       * This may not be necessary.
-		       */
-		      sm_bump_local_schema_version ();
-		    }
-		  free_grant_list (grant_list);
-		}
+	      goto end;
 	    }
 	}
     }
 
-fail_end:
-  if (grants != NULL)
+  error = au_revoke_internal (user, class_mop, type);
+  if (error != NO_ERROR)
     {
-      set_free (grants);
+      goto end;
     }
-  if (savepoint_revoke && error != NO_ERROR && error != ER_LK_UNILATERALLY_ABORTED)
+
+end:
+  if (savepoint_revoke && error != NO_ERROR && !ER_IS_ABORTED_DUE_TO_DEADLOCK (error))
     {
-      (void) tran_abort_upto_system_savepoint (UNIQUE_PARTITION_SAVEPOINT_REVOKE);
+      (void) tran_abort_upto_system_savepoint (UNIQUE_SAVEPOINT_REVOKE_USER);
     }
+
   if (sub_partitions)
     {
       free_and_init (sub_partitions);
     }
+
   AU_ENABLE (save);
-  return (error);
+
+  return error;
 }
+
 
 /*
  * MISC UTILITIES
