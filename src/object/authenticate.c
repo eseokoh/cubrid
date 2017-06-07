@@ -2166,7 +2166,8 @@ au_add_user (const char *name, int *exists)
       er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_DBA_ONLY, 1, "add_user");
       return NULL;
     }
-  else if (check_user_name (name))
+
+  if (check_user_name (name))
     {
       return NULL;
     }
@@ -2231,7 +2232,7 @@ au_add_user (const char *name, int *exists)
    */
   if (au_add_member_internal (Au_public_user, user, 1) != NO_ERROR)
     {
-      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
+      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
       goto error;
     }
 
@@ -2316,8 +2317,10 @@ au_add_user_method (MOP class_mop, DB_VALUE * returnval, DB_VALUE * name, DB_VAL
       return;
     }
 
-  if (tran_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY) != NO_ERROR)
+  error = tran_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY);
+  if (error != NO_ERROR)
     {
+      db_make_error (returnval, error);
       goto error;
     }
   set_savepoint = true;
@@ -5369,12 +5372,8 @@ au_change_owner_method (MOP obj, DB_VALUE * returnval, DB_VALUE * class_, DB_VAL
 	      error = au_change_owner (sub_partitions[i], user);
 	      if (error != NO_ERROR)
 		{
-		  break;
+		  goto fail_return;
 		}
-	    }
-	  if (error != NO_ERROR)
-	    {
-	      goto fail_return;
 	    }
 	}
     }
@@ -5816,7 +5815,9 @@ au_change_sp_owner_method (MOP obj, DB_VALUE * returnval, DB_VALUE * sp, DB_VALU
 	      if (user != NULL)
 		{
 		  if ((error = au_change_sp_owner (sp_mop, user)) == NO_ERROR)
-		    ok = 1;
+		    {
+		      ok = 1;
+		    }
 		}
 	    }
 	}
