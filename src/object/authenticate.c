@@ -175,6 +175,7 @@ const char *AU_DBA_USER_NAME = "DBA";
 	 strcmp(name, CT_CHARSET_NAME) == 0)
 
 #define UNIQUE_SAVEPOINT_ADD_USER_ENTITY "aDDuSEReNTITY"
+#define UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY "aDDuSERaNDsETpASSeNTITY"
 #define UNIQUE_SAVEPOINT_DROP_USER_ENTITY "dROPuSEReNTITY"
 
 typedef enum fetch_by FETCH_BY;
@@ -2185,8 +2186,10 @@ au_add_user (const char *name, int *exists)
       if (exists != NULL)
 	{
 	  *exists = 1;
+
 	  /* return existing user object */
-	  goto error;
+	  AU_ENABLE (save);
+	  return user;
 	}
     }
 
@@ -2278,6 +2281,7 @@ au_add_user_method (MOP class_mop, DB_VALUE * returnval, DB_VALUE * name, DB_VAL
   int exists;
   MOP user;
   char *tmp;
+  bool set_savepoint = false;
 
   if (name == NULL || !IS_STRING (name) || DB_IS_NULL (name) || ((tmp = db_get_string (name)) == NULL))
     {
@@ -2308,17 +2312,30 @@ au_add_user_method (MOP class_mop, DB_VALUE * returnval, DB_VALUE * name, DB_VAL
       return;
     }
 
+  if (tran_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY) != NO_ERROR)
+    {
+      goto error;
+    }
+  set_savepoint = true;
+
   user = au_add_user (db_get_string (name), &exists);
   if (user == NULL)
     {
       /* return the error that was set */
-      db_make_error (returnval, er_errid ());
+      error = er_errid ();
+      db_make_error (returnval, error);
+
+      /* not really need to jump to error but want to keep consistency */
+      goto error;
     }
   else if (exists)
     {
       error = ER_AU_USER_EXISTS;
       er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 1, db_get_string (name));
       db_make_error (returnval, error);
+
+      /* not really need to jump to error but want to keep consistency */
+      goto error;
     }
   else
     {
@@ -2328,16 +2345,18 @@ au_add_user_method (MOP class_mop, DB_VALUE * returnval, DB_VALUE * name, DB_VAL
 	  if (error != NO_ERROR)
 	    {
 	      db_make_error (returnval, error);
-	    }
-	  else
-	    {
-	      db_make_object (returnval, user);
+	      goto error;
 	    }
 	}
-      else
-	{
-	  db_make_object (returnval, user);
-	}
+      db_make_object (returnval, user);
+    }
+
+  return;
+
+error:
+  if (set_savepoint && !ER_IS_ABORTED_DUE_TO_DEADLOCK (error))
+    {
+      tran_abort_upto_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_AND_SET_PASS_ENTITY);
     }
 }
 
