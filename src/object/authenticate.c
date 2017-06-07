@@ -2279,66 +2279,65 @@ au_add_user_method (MOP class_mop, DB_VALUE * returnval, DB_VALUE * name, DB_VAL
   MOP user;
   char *tmp;
 
-  if (name != NULL && IS_STRING (name) && !DB_IS_NULL (name) && ((tmp = db_get_string (name)) != NULL))
-    {
-      if (intl_identifier_upper_string_size (tmp) >= DB_MAX_USER_LENGTH)
-	{
-	  error = ER_USER_NAME_TOO_LONG;
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
-	  db_make_error (returnval, error);
-	  return;
-	}
-      /* 
-       * although au_set_password will check this, check it out here before
-       * we bother creating the user object
-       */
-      if (password != NULL && IS_STRING (password) && !DB_IS_NULL (password) && (tmp = db_get_string (password))
-	  && strlen (tmp) > AU_MAX_PASSWORD_CHARS)
-	{
-	  error = ER_AU_PASSWORD_OVERFLOW;
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
-	  db_make_error (returnval, error);
-	}
-      else
-	{
-	  user = au_add_user (db_get_string (name), &exists);
-	  if (user == NULL)
-	    {
-	      /* return the error that was set */
-	      db_make_error (returnval, er_errid ());
-	    }
-	  else if (exists)
-	    {
-	      error = ER_AU_USER_EXISTS;
-	      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 1, db_get_string (name));
-	      db_make_error (returnval, error);
-	    }
-	  else
-	    {
-	      if (password != NULL && IS_STRING (password) && !DB_IS_NULL (password))
-		{
-		  error = au_set_password (user, db_get_string (password));
-		  if (error != NO_ERROR)
-		    {
-		      db_make_error (returnval, error);
-		    }
-		  else
-		    {
-		      db_make_object (returnval, user);
-		    }
-		}
-	      else
-		{
-		  db_make_object (returnval, user);
-		}
-	    }
-	}
-    }
-  else
+  if (name == NULL || !IS_STRING (name) || DB_IS_NULL (name) || ((tmp = db_get_string (name)) == NULL))
     {
       error = ER_AU_INVALID_USER;
       er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 1, "");
       db_make_error (returnval, error);
+      return;
+    }
+
+  if (intl_identifier_upper_string_size (tmp) >= DB_MAX_USER_LENGTH)
+    {
+      error = ER_USER_NAME_TOO_LONG;
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
+      db_make_error (returnval, error);
+      return;
+    }
+
+  /* 
+   * although au_set_password will check this, check it out here before
+   * we bother creating the user object
+   */
+  if (password != NULL && IS_STRING (password) && !DB_IS_NULL (password) && (tmp = db_get_string (password))
+      && strlen (tmp) > AU_MAX_PASSWORD_CHARS)
+    {
+      error = ER_AU_PASSWORD_OVERFLOW;
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, error, 0);
+      db_make_error (returnval, error);
+      return;
+    }
+
+  user = au_add_user (db_get_string (name), &exists);
+  if (user == NULL)
+    {
+      /* return the error that was set */
+      db_make_error (returnval, er_errid ());
+    }
+  else if (exists)
+    {
+      error = ER_AU_USER_EXISTS;
+      er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, error, 1, db_get_string (name));
+      db_make_error (returnval, error);
+    }
+  else
+    {
+      if (password != NULL && IS_STRING (password) && !DB_IS_NULL (password))
+	{
+	  error = au_set_password (user, db_get_string (password));
+	  if (error != NO_ERROR)
+	    {
+	      db_make_error (returnval, error);
+	    }
+	  else
+	    {
+	      db_make_object (returnval, user);
+	    }
+	}
+      else
+	{
+	  db_make_object (returnval, user);
+	}
     }
 }
 
