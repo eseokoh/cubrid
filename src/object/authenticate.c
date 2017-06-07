@@ -174,6 +174,7 @@ const char *AU_DBA_USER_NAME = "DBA";
          strcmp(name, CT_AUTHORIZATIONS_NAME) == 0 || \
 	 strcmp(name, CT_CHARSET_NAME) == 0)
 
+#define UNIQUE_SAVEPOINT_ADD_USER_ENTITY "aDDuSEReNTITY"
 #define UNIQUE_SAVEPOINT_DROP_USER_ENTITY "dROPuSEReNTITY"
 
 typedef enum fetch_by FETCH_BY;
@@ -1400,96 +1401,92 @@ au_make_user (const char *name)
   DB_SET *set;
   char *lname;
   int error;
+  int name_size;
 
   user = NULL;
   uclass = sm_find_class (AU_USER_CLASS_NAME);
   if (uclass == NULL)
     {
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_MISSING_CLASS, 1, AU_USER_CLASS_NAME);
+      return NULL;
     }
-  else
+
+  aclass = sm_find_class (AU_AUTH_CLASS_NAME);
+  if (aclass == NULL)
     {
-      aclass = sm_find_class (AU_AUTH_CLASS_NAME);
-      if (aclass == NULL)
-	{
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_MISSING_CLASS, 1, AU_AUTH_CLASS_NAME);
-	}
-      else
-	{
-	  int name_size;
-
-	  user = obj_create (uclass);
-	  name_size = intl_identifier_upper_string_size (name);
-	  lname = (char *) malloc (name_size + 1);
-	  if (lname)
-	    {
-	      intl_identifier_upper (name, lname);
-	      db_make_string (&value, lname);
-	      error = obj_set (user, "name", &value);
-	      free_and_init (lname);
-	      if (error != NO_ERROR)
-		{
-		  if (!ER_IS_ABORTED_DUE_TO_DEADLOCK (error))
-		    {
-		      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_ACCESS_ERROR, 2, AU_USER_CLASS_NAME, "name");
-		      obj_delete (user);
-		    }
-		  user = NULL;
-		}
-	      else
-		{
-		  /* flattened group list */
-		  set = set_create_basic ();
-		  if (set == NULL)
-		    {
-		      goto memory_error;
-		    }
-		  db_make_set (&value, set);
-		  obj_set (user, "groups", &value);
-		  set_free (set);
-
-		  /* direct group list */
-		  set = set_create_basic ();
-		  if (set == NULL)
-		    {
-		      goto memory_error;
-		    }
-		  db_make_set (&value, set);
-		  obj_set (user, "direct_groups", &value);
-		  set_free (set);
-
-		  /* authorization object */
-		  auth = obj_create (aclass);
-		  if (auth == NULL)
-		    {
-		      goto memory_error;
-		    }
-		  db_make_object (&value, user);
-		  /* back pointer to user object */
-		  obj_set (auth, "owner", &value);
-		  set = set_create_sequence (0);
-		  if (set == NULL)
-		    {
-		      goto memory_error;
-		    }
-		  db_make_sequence (&value, set);
-		  obj_set (auth, "grants", &value);
-		  set_free (set);
-
-		  db_make_object (&value, auth);
-		  obj_set (user, "authorization", &value);
-
-		  db_make_null (&value);
-		  obj_set (user, "comment", &value);
-		}
-	    }
-	  else
-	    {
-	      goto memory_error;
-	    }
-	}
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_MISSING_CLASS, 1, AU_AUTH_CLASS_NAME);
+      return NULL;
     }
-  return (user);
+
+  user = obj_create (uclass);
+  name_size = intl_identifier_upper_string_size (name);
+  lname = (char *) malloc (name_size + 1);
+  if (lname == NULL)
+    {
+      goto memory_error;
+    }
+
+  intl_identifier_upper (name, lname);
+  db_make_string (&value, lname);
+
+  error = obj_set (user, "name", &value);
+  free_and_init (lname);
+
+  if (error != NO_ERROR)
+    {
+      if (!ER_IS_ABORTED_DUE_TO_DEADLOCK (error))
+	{
+	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_ACCESS_ERROR, 2, AU_USER_CLASS_NAME, "name");
+	  obj_delete (user);
+	}
+      return NULL;
+    }
+
+  /* flattened group list */
+  set = set_create_basic ();
+  if (set == NULL)
+    {
+      goto memory_error;
+    }
+  db_make_set (&value, set);
+  obj_set (user, "groups", &value);
+  set_free (set);
+
+  /* direct group list */
+  set = set_create_basic ();
+  if (set == NULL)
+    {
+      goto memory_error;
+    }
+  db_make_set (&value, set);
+  obj_set (user, "direct_groups", &value);
+  set_free (set);
+
+  /* authorization object */
+  auth = obj_create (aclass);
+  if (auth == NULL)
+    {
+      goto memory_error;
+    }
+  db_make_object (&value, user);
+  /* back pointer to user object */
+  obj_set (auth, "owner", &value);
+  set = set_create_sequence (0);
+  if (set == NULL)
+    {
+      goto memory_error;
+    }
+  db_make_sequence (&value, set);
+  obj_set (auth, "grants", &value);
+  set_free (set);
+
+  db_make_object (&value, auth);
+  obj_set (user, "authorization", &value);
+
+  db_make_null (&value);
+  obj_set (user, "comment", &value);
+
+  return user;
 
 memory_error:
   if (user != NULL)
@@ -2161,87 +2158,113 @@ au_add_user (const char *name, int *exists)
   MOP user;
   DB_VALUE value;
   int save;
+  bool set_savepoint = false;
 
-  user = NULL;
   if (Au_dba_user != NULL && !au_is_dba_group_member (Au_user))
     {
       er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_DBA_ONLY, 1, "add_user");
+      return NULL;
     }
-  else if (!check_user_name (name))
+  else if (check_user_name (name))
     {
-      AU_DISABLE (save);
-      user = NULL;
+      return NULL;
+    }
+
+  AU_DISABLE (save);
+  user = NULL;
+  if (exists != NULL)
+    {
+      *exists = 0;
+    }
+
+  if (name == NULL)
+    {
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_INVALID_USER_NAME, 1, "");
+      goto error;
+    }
+
+  user = au_find_user (name);
+  if (user != NULL)
+    {
       if (exists != NULL)
 	{
-	  *exists = 0;
+	  *exists = 1;
+	  /* return existing user object */
+	  goto error;
 	}
-      if (name == NULL)
-	{
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_INVALID_USER_NAME, 1, "");
-	}
-      else
-	{
-	  user = au_find_user (name);
-	  if (user != NULL)
-	    {
-	      if (exists != NULL)
-		{
-		  *exists = 1;
-		}
-	    }
-	  else
-	    {
-	      if (er_errid () != ER_AU_INVALID_USER)
-		{
-		  AU_ENABLE (save);
-		  return NULL;
-		}
-
-	      /* clear error */
-	      er_clear ();
-
-	      user = au_make_user (name);
-	      if (user != NULL)
-		{
-		  db_make_object (&value, user);
-		  if (Au_public_user != NULL)
-		    {
-		      /* 
-		       * every user is a member of the PUBLIC group,
-		       * must make sure that the exported routines can't
-		       * be used to violate this internal connection
-		       */
-		      if (au_add_member_internal (Au_public_user, user, 1) != NO_ERROR)
-			{
-			  er_set (ER_WARNING_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
-			}
-		    }
-
-		  /* 
-		   * do we want to do this ?? - logically it is ok but this
-		   * means we can't have DBA members since this would
-		   * cause user hierarchy cycles.
-		   */
-#if 0
-		  if (Au_dba_user != NULL)
-		    {
-		      if (au_get_set (Au_dba_user, "groups", &dba_groups) == NO_ERROR)
-			{
-			  db_make_object (&value, user);
-			  if (!set_ismember (dba_groups, &value))
-			    {
-			      db_set_add (dba_groups, &value);
-			    }
-			  set_free (dba_groups);
-			}
-		    }
-#endif /* 0 */
-		}
-	    }
-	}
-      AU_ENABLE (save);
     }
-  return (user);
+
+  if (er_errid () != ER_AU_INVALID_USER)
+    {
+      user = NULL;
+      goto error;
+    }
+
+  /* clear error */
+  er_clear ();
+
+  if (tran_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_ENTITY) != NO_ERROR)
+    {
+      goto error;
+    }
+  set_savepoint = true;
+
+  user = au_make_user (name);
+  if (user == NULL)
+    {
+      goto error;
+    }
+
+  if (Au_public_user == NULL)
+    {
+      assert (Au_public_user != NULL);
+      goto error;
+    }
+
+  /* 
+   * every user is a member of the PUBLIC group,
+   * must make sure that the exported routines can't
+   * be used to violate this internal connection
+   */
+  if (au_add_member_internal (Au_public_user, user, 1) != NO_ERROR)
+    {
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_AU_CANT_ADD_MEMBER, 2, name, "PUBLIC");
+      goto error;
+    }
+
+  /* 
+   * do we want to do this ?? - logically it is ok but this
+   * means we can't have DBA members since this would
+   * cause user hierarchy cycles.
+   */
+#if 0
+  if (Au_dba_user != NULL)
+    {
+      if (au_get_set (Au_dba_user, "groups", &dba_groups) == NO_ERROR)
+	{
+	  db_make_object (&value, user);
+	  if (!set_ismember (dba_groups, &value))
+	    {
+	      db_set_add (dba_groups, &value);
+	    }
+	  set_free (dba_groups);
+	}
+    }
+#endif /* 0 */
+
+  AU_ENABLE (save);
+
+  return user;
+
+error:
+  if (set_savepoint && !ER_IS_ABORTED_DUE_TO_DEADLOCK (er_errid ()))
+    {
+      tran_abort_upto_system_savepoint (UNIQUE_SAVEPOINT_ADD_USER_ENTITY);
+    }
+
+  AU_ENABLE (save);
+
+  return NULL;
 }
 
 /*
@@ -2571,10 +2594,11 @@ au_set_password_internal (MOP user, const char *password, int encode, char encry
 	{
 	  len = strlen (password);
 	  if (len == 0)
-	    password = NULL;
+	    {
+	      password = NULL;
+	    }
 	  /* 
-	   * check for large passwords, only do this
-	   * if the encode flag is on !
+	   * check for large passwords, only do this if the encode flag is on !
 	   */
 	  else if (len > AU_MAX_PASSWORD_CHARS && encode)
 	    {
@@ -2701,8 +2725,7 @@ au_set_password_method (MOP user, DB_VALUE * returnval, DB_VALUE * password)
 }
 
 /*
- * au_set_password_encoded_method - Method interface for setting
- *                                  encoded passwords.
+ * au_set_password_encoded_method - Method interface for setting encoded passwords.
  *   return: none
  *   user(in): user object
  *   returnval(out): return value of this object
@@ -2710,8 +2733,7 @@ au_set_password_method (MOP user, DB_VALUE * returnval, DB_VALUE * password)
  *
  * Note: We don't check for the 8 character limit here because this is intended
  *       to be used only by the schema generated by unloaddb.  For this
- *       application, the password length was validated when it was first
- *       created.
+ *       application, the password length was validated when it was first created.
  */
 void
 au_set_password_encoded_method (MOP user, DB_VALUE * returnval, DB_VALUE * password)
@@ -3645,13 +3667,18 @@ au_drop_user (MOP user)
    */
 
   error = obj_delete (user);
-  if (error == NO_ERROR)
+  if (error != NO_ERROR)
     {
-      remove_user_cache_references (user);
+      goto error;
     }
 
+  remove_user_cache_references (user);
+
+  AU_ENABLE (save);
+  return error;
+
 error:
-  if (set_savepoint && error != ER_LK_UNILATERALLY_ABORTED)
+  if (set_savepoint && !ER_IS_ABORTED_DUE_TO_DEADLOCK (error))
     {
       tran_abort_upto_system_savepoint (UNIQUE_SAVEPOINT_DROP_USER_ENTITY);
     }
