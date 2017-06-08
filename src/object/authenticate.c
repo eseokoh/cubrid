@@ -4453,7 +4453,7 @@ au_grant_internal (MOP user, MOP class_mop, DB_AUTH type, bool grant_option)
   error = au_fetch_class_force (class_mop, &classobj, AU_FETCH_READ);
   if (error != NO_ERROR)
     {
-      return NO_ERROR;
+      return error;
     }
 
   if (ws_is_same_object (classobj->owner, user))
