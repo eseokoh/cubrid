@@ -6056,10 +6056,17 @@ stx_build_analytic_eval_type (THREAD_ENTRY * thread_p, char *ptr, ANALYTIC_EVAL_
   XASL_UNPACK_INFO *xasl_unpack_info = stx_get_xasl_unpack_info_ptr (thread_p);
 
   ptr = or_unpack_int (ptr, &offset);
-  analytic_eval->head = stx_restore_analytic_type (thread_p, &xasl_unpack_info->packed_xasl[offset]);
-  if (analytic_eval->head == NULL)
+  if (offset == 0)
     {
-      goto error;
+      analytic_eval->head = NULL;
+    }
+  else
+    {
+      analytic_eval->head = stx_restore_analytic_type (thread_p, &xasl_unpack_info->packed_xasl[offset]);
+      if (analytic_eval->head == NULL)
+	{
+	  goto error;
+	}
     }
 
   ptr = or_unpack_int (ptr, &offset);

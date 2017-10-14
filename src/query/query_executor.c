@@ -19629,21 +19629,25 @@ qexec_initialize_analytic_state (THREAD_ENTRY * thread_p, ANALYTIC_STATE * analy
       ;				/* count analytic functions */
     }
 
-  analytic_state->func_state_list =
-    (ANALYTIC_FUNCTION_STATE *) db_private_alloc (thread_p,
-						  sizeof (ANALYTIC_FUNCTION_STATE) * analytic_state->func_count);
-  if (analytic_state->func_state_list == NULL)
+  analytic_state->func_state_list = NULL;
+  if (analytic_state->func_count > 0)
     {
-      return NULL;
-    }
-
-  memset (analytic_state->func_state_list, 0, analytic_state->func_count * sizeof (ANALYTIC_FUNCTION_STATE));
-  for (i = 0, func_p = a_func_list; i < analytic_state->func_count; i++, func_p = func_p->next)
-    {
-      if (qexec_initialize_analytic_function_state (thread_p, &analytic_state->func_state_list[i], func_p, xasl_state)
-	  != NO_ERROR)
+      analytic_state->func_state_list =
+	(ANALYTIC_FUNCTION_STATE *) db_private_alloc (thread_p,
+						      sizeof (ANALYTIC_FUNCTION_STATE) * analytic_state->func_count);
+      if (analytic_state->func_state_list == NULL)
 	{
 	  return NULL;
+	}
+
+      memset (analytic_state->func_state_list, 0, analytic_state->func_count * sizeof (ANALYTIC_FUNCTION_STATE));
+      for (i = 0, func_p = a_func_list; i < analytic_state->func_count; i++, func_p = func_p->next)
+	{
+	  if (qexec_initialize_analytic_function_state (thread_p, &analytic_state->func_state_list[i], func_p,
+							xasl_state) != NO_ERROR)
+	    {
+	      return NULL;
+	    }
 	}
     }
 
