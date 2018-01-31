@@ -9667,6 +9667,8 @@ prm_tune_parameters (void)
   test_mode_prm = prm_find (PRM_NAME_TEST_MODE, NULL);
   tz_leap_second_support_prm = prm_find (PRM_NAME_TZ_LEAP_SECOND_SUPPORT, NULL);
 
+  sysprm_set_force (prm_get_name (PRM_ID_JAVA_STORED_PROCEDURE), "no");
+
   /* disable AOUT list until we fix CBRD-20741 */
   if (pb_aout_ratio_prm != NULL)
     {
@@ -9916,6 +9918,8 @@ prm_tune_parameters (void)
   ha_check_disk_failure_interval_prm = prm_find (PRM_NAME_HA_CHECK_DISK_FAILURE_INTERVAL_IN_SECS, NULL);
   test_mode_prm = prm_find (PRM_NAME_TEST_MODE, NULL);
   tz_leap_second_support_prm = prm_find (PRM_NAME_TZ_LEAP_SECOND_SUPPORT, NULL);
+
+  sysprm_set_force (prm_get_name (PRM_ID_JAVA_STORED_PROCEDURE), "no");
 
   assert (max_plan_cache_entries_prm != NULL);
   if (max_plan_cache_entries_prm == NULL)
