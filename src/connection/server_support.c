@@ -1400,7 +1400,8 @@ css_init (THREAD_ENTRY * thread_p, char *server_name, int name_length, int port_
   const std::size_t MAX_CONNECTIONS = css_get_max_conn ();
 
   // create request worker pool
-  css_Server_request_worker_pool = cubthread::get_manager ()->create_worker_pool (MAX_WORKERS, MAX_TASK_COUNT, NULL,
+  css_Server_request_worker_pool = cubthread::get_manager ()->create_worker_pool (MAX_WORKERS, MAX_TASK_COUNT,
+                                                                                  "transaction workers", NULL,
 										  cubthread::system_core_count (),
 										  false);
   if (css_Server_request_worker_pool == NULL)
@@ -1413,8 +1414,8 @@ css_init (THREAD_ENTRY * thread_p, char *server_name, int name_length, int port_
 
   // create connection worker pool
   css_Connection_worker_pool =
-    cubthread::get_manager ()->create_worker_pool (MAX_CONNECTIONS, MAX_CONNECTIONS, NULL, 1, false, true,
-						   std::chrono::minutes (5));
+    cubthread::get_manager ()->create_worker_pool (MAX_CONNECTIONS, MAX_CONNECTIONS, "connection threads", NULL, 1,
+                                                   false, true, std::chrono::minutes (5));
   if (css_Connection_worker_pool == NULL)
     {
       assert (false);
