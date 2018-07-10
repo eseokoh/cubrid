@@ -1495,6 +1495,9 @@ shutdown:
   // stop log writers
   css_stop_all_workers (*thread_p, THREAD_STOP_LOGWR);
 
+  css_Server_request_worker_pool->er_log_stats ();
+  css_Connection_worker_pool->er_log_stats ();
+
   // destroy thread worker pools
   thread_get_manager ()->destroy_worker_pool (css_Server_request_worker_pool);
   thread_get_manager ()->destroy_worker_pool (css_Connection_worker_pool);
