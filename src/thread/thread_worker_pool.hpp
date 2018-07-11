@@ -688,12 +688,10 @@ namespace cubthread
   void
   worker_pool<Context>::er_log_stats (void) const
   {
-    cubperf::statset& stats = wp_worker_statset_create ();
-
-    get_stats (stats.m_values);
-    wp_er_log_stats (m_name.c_str (), stats.m_values);
-
-    wp_worker_statset_destroy (stats);
+    const std::size_t MAX_SIZE = 32;
+    cubperf::stat_value stats[MAX_SIZE];
+    get_stats (stats);
+    wp_er_log_stats (m_name.c_str (), stats);
   }
 
   template <typename Context>
