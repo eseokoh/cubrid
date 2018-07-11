@@ -44,6 +44,7 @@
 #include <thread>
 
 #include <cassert>
+#include <cstring>
 
 namespace cubthread
 {
@@ -690,6 +691,7 @@ namespace cubthread
   {
     const std::size_t MAX_SIZE = 32;
     cubperf::stat_value stats[MAX_SIZE];
+    std::memset (stats, 0, sizeof (stats));
     get_stats (stats);
     wp_er_log_stats (m_name.c_str (), stats);
   }
