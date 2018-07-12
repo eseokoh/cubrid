@@ -1403,7 +1403,8 @@ css_init (THREAD_ENTRY * thread_p, char *server_name, int name_length, int port_
   css_Server_request_worker_pool = cubthread::get_manager ()->create_worker_pool (MAX_WORKERS, MAX_TASK_COUNT,
                                                                                   "transaction workers", NULL,
 										  cubthread::system_core_count (),
-										  false);
+										  false, true,
+                                                                                  std::chrono::minutes (5));
   if (css_Server_request_worker_pool == NULL)
     {
       assert (false);
