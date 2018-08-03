@@ -242,7 +242,7 @@ typedef int (*FILE_EXTDATA_ITEM_FUNC) (THREAD_ENTRY * thread_p, const void *data
 #define file_fault_inject_extdata_update() \
   do \
     { \
-      int mod_factor = 2;	/* 50% */ \
+      int mod_factor = 1;	/* 100% */ \
       FI_TEST_ARG (thread_p, FI_TEST_FILE_MANAGER_EXTDATA_UPDATE, &mod_factor, 0); \
     } \
   while (0)
