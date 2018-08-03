@@ -238,6 +238,18 @@ typedef int (*FILE_EXTDATA_FUNC) (THREAD_ENTRY * thread_p,
 				  const FILE_EXTENSIBLE_DATA * extdata, bool * stop, void *args);
 typedef int (*FILE_EXTDATA_ITEM_FUNC) (THREAD_ENTRY * thread_p, const void *data, int index, bool * stop, void *args);
 
+#if !defined (NDEBUG)
+#define file_fault_inject_extdata_update() \
+  do \
+    { \
+      int mod_factor = 2;	/* 50% */ \
+      FI_TEST_ARG (thread_p, FI_TEST_FILE_MANAGER_EXTDATA_UPDATE, &mod_factor, 0); \
+    } \
+  while (0)
+#else
+#define file_fault_inject_extdata_update()
+#endif // !NDEBUG
+
 /************************************************************************/
 /* Partially allocated sectors section                                  */
 /************************************************************************/
@@ -4664,6 +4676,8 @@ file_table_move_partial_sectors_to_header (THREAD_ENTRY * thread_p, PAGE_PTR pag
       file_extdata_remove_at (extdata_part_ftab_first, 0, n_items_to_move);
       file_log_extdata_remove (thread_p, extdata_part_ftab_first, page_part_ftab_first, 0, n_items_to_move);
 
+      file_fault_inject_extdata_update (); // injects fault
+
       file_log ("file_table_move_partial_sectors_to_header",
 		"removed %d items from first page partial table \n"
 		"file %d|%d, page %d|%d, prev_lsa %lld|%d, crt_lsa %lld|%d \n"
@@ -5990,6 +6004,8 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	  save_page_lsa = *pgbuf_get_lsa (addr.pgptr);
 	  file_log_extdata_add (thread_p, extdata_part_ftab, addr.pgptr, position, 1, &partsect_new);
 	  file_extdata_insert_at (extdata_part_ftab, position, 1, &partsect_new);
+
+          file_fault_inject_extdata_update (); // injects fault
 
 	  file_log ("file_perm_dealloc",
 		    "add new partsect at position %d in file %d|%d, page %d|%d, prev_lsa %lld|%d, "
@@ -7480,6 +7496,8 @@ file_numerable_add_page (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPI
       pgbuf_set_dirty (thread_p, page_extdata, DONT_FREE);
     }
   file_extdata_append (extdata_user_page_ftab, vpid);
+
+  file_fault_inject_extdata_update (); // injects fault
 
   file_log ("file_numerable_add_page",
 	    "add page %d|%d to position %d in file %d|%d, page %d|%d, prev_lsa = %lld|%d, crt_lsa = %lld|%d \n"
