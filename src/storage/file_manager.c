@@ -238,7 +238,7 @@ typedef int (*FILE_EXTDATA_FUNC) (THREAD_ENTRY * thread_p,
 				  const FILE_EXTENSIBLE_DATA * extdata, bool * stop, void *args);
 typedef int (*FILE_EXTDATA_ITEM_FUNC) (THREAD_ENTRY * thread_p, const void *data, int index, bool * stop, void *args);
 
-#if !defined (NDEBUG)
+#if !defined (NDEBUG) && defined (SERVER_MODE)
 #define file_fault_inject_extdata_update() \
   do \
     { \
