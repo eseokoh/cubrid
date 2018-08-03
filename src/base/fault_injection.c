@@ -41,6 +41,7 @@
 
 static int fi_handler_exit (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line);
 static int fi_handler_random_exit (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line);
+static int fi_handler_random_exit_with_log_flush (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line);
 static int fi_handler_random_fail (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line);
 static int fi_handler_hang (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line);
 
@@ -58,15 +59,12 @@ FI_TEST_ITEM fi_Test_array[] = {
   {FI_TEST_FILE_IO_FORMAT, fi_handler_random_exit, FI_INIT_STATE},
   {FI_TEST_DISK_MANAGER_VOLUME_ADD, fi_handler_random_exit, FI_INIT_STATE},
   {FI_TEST_DISK_MANAGER_VOLUME_EXPAND, fi_handler_random_exit, FI_INIT_STATE},
-  {FI_TEST_FILE_MANAGER_UNDO_TRACKER_REGISTER, fi_handler_exit,
-   FI_INIT_STATE},
+  {FI_TEST_FILE_MANAGER_UNDO_TRACKER_REGISTER, fi_handler_exit, FI_INIT_STATE},
+  {FI_TEST_FILE_MANAGER_EXTDATA_UPDATE, fi_handler_random_exit_with_log_flush, FI_INIT_STATE},
   {FI_TEST_BTREE_MANAGER_RANDOM_EXIT, fi_handler_random_exit, FI_INIT_STATE},
-  {FI_TEST_LOG_MANAGER_RANDOM_EXIT_AT_RUN_POSTPONE, fi_handler_random_exit,
-   FI_INIT_STATE},
-  {FI_TEST_LOG_MANAGER_RANDOM_EXIT_AT_END_SYSTEMOP, fi_handler_random_exit,
-   FI_INIT_STATE},
-  {FI_TEST_BTREE_MANAGER_PAGE_DEALLOC_FAIL, fi_handler_random_fail,
-   FI_INIT_STATE}
+  {FI_TEST_LOG_MANAGER_RANDOM_EXIT_AT_RUN_POSTPONE, fi_handler_random_exit, FI_INIT_STATE},
+  {FI_TEST_LOG_MANAGER_RANDOM_EXIT_AT_END_SYSTEMOP, fi_handler_random_exit, FI_INIT_STATE},
+  {FI_TEST_BTREE_MANAGER_PAGE_DEALLOC_FAIL, fi_handler_random_fail, FI_INIT_STATE}
 };
 
 FI_TEST_CODE fi_Group_none[] = {
@@ -434,6 +432,55 @@ fi_handler_random_exit (THREAD_ENTRY * thread_p, void *arg, const char *caller_f
 #endif
   if ((r % mod_factor) == 0)
     {
+      er_print_callstack (ARG_FILE_LINE, "FAULT INJECTION: RANDOM EXIT\n");
+      er_set (ER_NOTIFICATION_SEVERITY, caller_file, caller_line, ER_FAILED_ASSERTION, 1,
+	      "fault injection: random exit");
+
+      if (prm_get_bool_value (PRM_ID_FAULT_INJECTION_ACTION_PREFER_ABORT_TO_EXIT))
+	{
+	  abort ();
+	}
+      else
+	{
+	  _exit (0);
+	}
+    }
+
+  return NO_ERROR;
+}
+
+static int
+fi_handler_random_exit_with_log_flush (THREAD_ENTRY * thread_p, void *arg, const char *caller_file, const int caller_line)
+{
+  static bool init = false;
+  int r;
+  int mod_factor;
+
+  if (arg == NULL)
+    {
+      mod_factor = 20000;
+    }
+  else
+    {
+      mod_factor = *((int *) arg);
+    }
+
+  if (init == false)
+    {
+      srand ((unsigned int) time (NULL));
+      init = true;
+    }
+  r = rand ();
+
+  if ((r % mod_factor) == 0)
+    {
+#if defined (SERVER_MODE) || defined (SA_MODE)
+      // flush log
+      LOG_CS_ENTER (thread_p);
+      logpb_flush_pages_direct (thread_p);
+      LOG_CS_EXIT (thread_p);
+#endif // SERVER_MODE || SA_MODE
+
       er_print_callstack (ARG_FILE_LINE, "FAULT INJECTION: RANDOM EXIT\n");
       er_set (ER_NOTIFICATION_SEVERITY, caller_file, caller_line, ER_FAILED_ASSERTION, 1,
 	      "fault injection: random exit");
