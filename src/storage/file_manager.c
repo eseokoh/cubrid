@@ -2291,6 +2291,8 @@ file_rv_dump_extdata_remove (FILE * fp, int length, void *data)
  * position (in) : Position in extensible data where items are added
  * count (in)	 : Item count
  * data (in)	 : Item(s)
+ *
+ * NOTE that usage of the function should be "update" and then "logging", since it requires REDO data.
  */
 STATIC_INLINE void
 file_log_extdata_add (THREAD_ENTRY * thread_p,
@@ -2324,6 +2326,8 @@ file_log_extdata_add (THREAD_ENTRY * thread_p,
  * page (in)	 : Page of extensible data
  * position (in) : Position in extensible data from where items are removed
  * count (in)	 : Item count
+ *
+ * NOTE that usage of the function should be "logging" and then "update", since it requires UNDO data.
  */
 STATIC_INLINE void
 file_log_extdata_remove (THREAD_ENTRY * thread_p,
@@ -2593,6 +2597,7 @@ file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA
 
 	  save_lsa = *pgbuf_get_lsa (page_crt);
 	  file_log_extdata_remove (thread_p, extdata_crt, page_crt, pos, 1);
+
 	  file_extdata_remove_at (extdata_crt, pos, 1);
 
 	  file_log ("file_extdata_find_and_remove_item", "removed extensible data item: \n"
@@ -4644,8 +4649,9 @@ file_table_move_partial_sectors_to_header (THREAD_ENTRY * thread_p, PAGE_PTR pag
   /* copy items to header section */
   file_extdata_append_array (extdata_part_ftab_head,
 			     file_extdata_start (extdata_part_ftab_first), (INT16) n_items_to_move);
-  save_lsa = *pgbuf_get_lsa (page_fhead);
+
   /* log changes to extensible data in header page */
+  save_lsa = *pgbuf_get_lsa (page_fhead);
   file_log_extdata_add (thread_p, extdata_part_ftab_head, page_fhead, 0,
 			n_items_to_move, file_extdata_start (extdata_part_ftab_first));
 
@@ -4661,8 +4667,9 @@ file_table_move_partial_sectors_to_header (THREAD_ENTRY * thread_p, PAGE_PTR pag
     {
       /* Remove copied entries. */
       save_lsa = *pgbuf_get_lsa (page_part_ftab_first);
-      file_extdata_remove_at (extdata_part_ftab_first, 0, n_items_to_move);
       file_log_extdata_remove (thread_p, extdata_part_ftab_first, page_part_ftab_first, 0, n_items_to_move);
+
+      file_extdata_remove_at (extdata_part_ftab_first, 0, n_items_to_move);
 
       file_log ("file_table_move_partial_sectors_to_header",
 		"removed %d items from first page partial table \n"
@@ -4901,6 +4908,7 @@ file_table_add_full_sector (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const 
       error_code = ER_FAILED;
       goto exit;
     }
+
   file_extdata_insert_at (extdata_full_ftab, pos, 1, vsid);
 
   /* log the change. */
@@ -5108,6 +5116,7 @@ file_perm_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
        * partial sector. */
       save_lsa = *pgbuf_get_lsa (page_fhead);
       file_log_extdata_remove (thread_p, extdata_part_ftab, page_fhead, 0, 1);
+
       file_extdata_remove_at (extdata_part_ftab, 0, 1);
 
       file_log ("file_perm_alloc",
@@ -5987,9 +5996,11 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	      error_code = ER_FAILED;
 	      goto exit;
 	    }
+
+	  file_extdata_insert_at (extdata_part_ftab, position, 1, &partsect_new);
+
 	  save_page_lsa = *pgbuf_get_lsa (addr.pgptr);
 	  file_log_extdata_add (thread_p, extdata_part_ftab, addr.pgptr, position, 1, &partsect_new);
-	  file_extdata_insert_at (extdata_part_ftab, position, 1, &partsect_new);
 
 	  file_log ("file_perm_dealloc",
 		    "add new partsect at position %d in file %d|%d, page %d|%d, prev_lsa %lld|%d, "
@@ -7467,6 +7478,9 @@ file_numerable_add_page (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPI
     }
 
   assert (!file_extdata_is_full (extdata_user_page_ftab));
+
+  file_extdata_append (extdata_user_page_ftab, vpid);
+
   save_lsa = *pgbuf_get_lsa (page_extdata);
   if (!FILE_IS_TEMPORARY (fhead))
     {
@@ -7479,7 +7493,6 @@ file_numerable_add_page (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPI
       /* just set dirty */
       pgbuf_set_dirty (thread_p, page_extdata, DONT_FREE);
     }
-  file_extdata_append (extdata_user_page_ftab, vpid);
 
   file_log ("file_numerable_add_page",
 	    "add page %d|%d to position %d in file %d|%d, page %d|%d, prev_lsa = %lld|%d, crt_lsa = %lld|%d \n"
@@ -9422,8 +9435,9 @@ file_tracker_register_internal (THREAD_ENTRY * thread_p, PAGE_PTR page_track_hea
       goto exit;
     }
 
-  save_lsa = *pgbuf_get_lsa (page_extdata);
   file_extdata_insert_at (extdata, pos, 1, item);
+
+  save_lsa = *pgbuf_get_lsa (page_extdata);
   file_log_extdata_add (thread_p, extdata, page_extdata, pos, 1, item);
   pgbuf_set_dirty (thread_p, page_extdata, DONT_FREE);
 
